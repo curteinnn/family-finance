@@ -1,0 +1,27 @@
+node_modules
+# Local environment and credentials (keep example files versioned)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.aws/credentials
+credentials/
+secrets/
+*.credentials
+*.secret
+*.secrets
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+key.properties
+service-account*.json
+
+dist/
+*.tsbuildinfo
+.agents/
+skills-lock.json
+

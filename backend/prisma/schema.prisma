@@ -1,0 +1,335 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =========================
+// ENUMS
+// =========================
+
+enum UserRole {
+  ADMIN
+  PARENT
+  CHILD
+}
+
+enum TransferStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  REJECTED
+}
+
+enum ExpenseStatus {
+  ACTIVE
+  VOIDED
+}
+
+enum NotificationType {
+  TRANSFER_RECEIVED
+  TRANSFER_CONFIRMED
+  TRANSFER_CANCELLED
+  GENERAL
+}
+
+enum AttachmentStatus {
+  PENDING
+  AVAILABLE
+}
+
+// =========================
+// FAMILY
+// =========================
+
+model Family {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parent        Parent?
+  children      Child[]
+  wallets       Wallet[]
+  transfers     FundTransfer[]
+  expenses      Expense[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  @@map("families")
+}
+
+// =========================
+// USERS
+// =========================
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  admin  Admin?
+  parent Parent?
+  child  Child?
+
+  voidedExpenses Expense[] @relation("ExpenseVoider")
+
+  notifications Notification[]
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+  attachments   Attachment[]   @relation("AttachmentUploader")
+
+  @@map("users")
+}
+
+model Admin {
+  userId    String   @id @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@map("admins")
+}
+
+model Parent {
+  userId    String   @id @db.Uuid
+  familyId  String   @unique @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  family         Family         @relation(fields: [familyId], references: [id], onDelete: Restrict)
+  sentTransfers  FundTransfer[]
+
+  @@map("parents")
+}
+
+model Child {
+  userId    String   @id @db.Uuid
+  familyId  String   @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user                User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  family              Family         @relation(fields: [familyId], references: [id], onDelete: Restrict)
+  wallet              Wallet?
+  receivedTransfers   FundTransfer[] @relation("TransferChild")
+  confirmedTransfers  FundTransfer[] @relation("TransferConfirmer")
+  expenses            Expense[]
+
+  @@index([familyId])
+  @@map("children")
+}
+
+// =========================
+// WALLETS
+// =========================
+
+model Wallet {
+  id        String   @id @default(uuid()) @db.Uuid
+  familyId  String   @db.Uuid
+  childId   String   @unique @db.Uuid
+  name      String   @default("Wallet Utama")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Restrict)
+  child  Child  @relation(fields: [childId], references: [userId], onDelete: Restrict)
+
+  transfers FundTransfer[]
+  expenses  Expense[]
+
+  @@index([familyId])
+  @@map("wallets")
+}
+
+// =========================
+// CATEGORIES
+// Global categories managed by admin
+// =========================
+
+model Category {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  expenses Expense[]
+
+  @@map("categories")
+}
+
+// =========================
+// FUND TRANSFERS
+// =========================
+
+model FundTransfer {
+  id            String         @id @default(uuid()) @db.Uuid
+  familyId      String         @db.Uuid
+  walletId      String         @db.Uuid
+  parentId      String         @db.Uuid
+  childId       String         @db.Uuid
+  amount        Decimal        @db.Decimal(14, 0)
+  note          String?
+  status        TransferStatus @default(PENDING)
+  confirmedByChildId String?   @db.Uuid
+  confirmedAt   DateTime?
+  cancelledAt   DateTime?
+  rejectedAt    DateTime?
+  rejectionReason String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Restrict)
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  parent     Parent @relation(fields: [parentId], references: [userId], onDelete: Restrict)
+  child      Child  @relation("TransferChild", fields: [childId], references: [userId], onDelete: Restrict)
+  confirmer  Child? @relation("TransferConfirmer", fields: [confirmedByChildId], references: [userId], onDelete: Restrict)
+
+  attachments Attachment[]
+
+  @@index([familyId, createdAt])
+  @@index([walletId, status])
+  @@index([parentId])
+  @@index([childId, createdAt])
+  @@map("fund_transfers")
+}
+
+// =========================
+// EXPENSES
+// =========================
+
+model Expense {
+  id          String        @id @default(uuid()) @db.Uuid
+  familyId    String        @db.Uuid
+  walletId    String        @db.Uuid
+  categoryId  String        @db.Uuid
+  childId     String        @db.Uuid
+  amount      Decimal       @db.Decimal(14, 0)
+  description String?
+  spentAt     DateTime      @default(now())
+  status      ExpenseStatus @default(ACTIVE)
+  voidedByUserId String?    @db.Uuid
+  voidedAt    DateTime?
+  voidReason  String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  family   Family   @relation(fields: [familyId], references: [id], onDelete: Restrict)
+  wallet   Wallet   @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  child   Child  @relation(fields: [childId], references: [userId], onDelete: Restrict)
+  voider  User?  @relation("ExpenseVoider", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+
+  attachments Attachment[]
+
+  @@index([familyId, spentAt])
+  @@index([walletId, status])
+  @@index([childId, spentAt])
+  @@index([categoryId])
+  @@map("expenses")
+}
+
+// =========================
+// ATTACHMENTS
+// File metadata only; actual files in private object storage
+// =========================
+
+model Attachment {
+  id           String   @id @default(uuid()) @db.Uuid
+  expenseId    String?  @db.Uuid
+  transferId   String?  @db.Uuid
+  uploadedById String   @db.Uuid
+  fileName     String
+  storageKey   String   @unique
+  mimeType     String
+  fileSize     BigInt
+  status       AttachmentStatus @default(PENDING)
+  createdAt    DateTime @default(now())
+
+  expense  Expense?      @relation(fields: [expenseId], references: [id], onDelete: Restrict)
+  transfer FundTransfer? @relation(fields: [transferId], references: [id], onDelete: Restrict)
+  uploader User          @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([expenseId])
+  @@index([transferId])
+  @@map("attachments")
+}
+
+// =========================
+// NOTIFICATIONS
+// =========================
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  familyId  String           @db.Uuid
+  userId    String           @db.Uuid
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+// =========================
+// AUDIT LOGS
+// =========================
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  familyId   String   @db.Uuid
+  actorId    String?  @db.Uuid
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?    @db.JsonB
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Restrict)
+  actor  User?  @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([familyId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+// =========================
+// REFRESH TOKENS
+// =========================
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, expiresAt])
+  @@map("refresh_tokens")
+}
