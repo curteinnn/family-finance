@@ -61,9 +61,12 @@ Required environment variable names for the backend: `DATABASE_URL`, `JWT_SECRET
 Apply the pending migrations to a development database before using the reject endpoint and IDR whole-rupiah storage. Prisma applies all pending migration folders in order:
 
 ```cmd
-npm run prisma:migrate:dev
-npm run prisma:generate
+npx prisma migrate dev
+npx prisma generate
+npx tsc -p tsconfig.build.json
 npm run start:dev
 ```
+
+`start:dev` runs `node --watch dist/main.js`; it watches compiled output and does not compile `src`. For automatic development rebuilds, run `npx tsc -p tsconfig.build.json --watch` in one terminal, wait for the initial compile, then run `npm run start:dev` in another terminal. The package does not define `prisma:migrate:dev` or `prisma:generate` npm scripts.
 
 Do not use `migrate dev` against production. Production deployment should generate and review a migration artifact first, then apply it through the deployment migration workflow.
