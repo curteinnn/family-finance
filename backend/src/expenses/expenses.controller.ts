@@ -27,6 +27,11 @@ export class ExpensesController {
     return this.expenses.list(user);
   }
 
+  @Get(':id')
+  getOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.expenses.getOne(id, user);
+  }
+
   @Post()
   @Roles(UserRole.CHILD)
   create(@Body() dto: CreateExpenseDto, @CurrentUser() user: AuthenticatedUser) {

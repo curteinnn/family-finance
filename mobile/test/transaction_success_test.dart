@@ -22,7 +22,24 @@ class _FakeApiClient extends ApiClient {
       return {
         'name': 'Family',
         'children': [
-          {'userId': 'child-id', 'name': 'Alya'},
+          {
+            'userId': 'child-id',
+            'name': 'Alya',
+            'wallet': {
+              'id': 'wallet-id',
+              'name': 'Wallet Alya',
+              'isActive': true,
+            },
+          },
+          {
+            'userId': 'child-2-id',
+            'name': 'Bima',
+            'wallet': {
+              'id': 'wallet-2-id',
+              'name': 'Wallet Bima',
+              'isActive': true,
+            },
+          },
         ],
       };
     }
@@ -38,15 +55,36 @@ class _FakeApiClient extends ApiClient {
             'childId': 'child-id',
             'name': 'Alya',
             'walletActive': true,
-            'balance': '0',
+            'balance': '15000',
+          },
+          {
+            'childId': 'child-2-id',
+            'name': 'Bima',
+            'walletActive': true,
+            'balance': '7500',
           },
         ],
       };
     }
     if (path.startsWith('/reports/monthly')) {
       return {
-        'totals': {'confirmedIncome': '0', 'activeExpenses': '0', 'net': '0'},
-        'expensesByCategory': <dynamic>[],
+        'year': 2026,
+        'month': 11,
+        'totals': {
+          'confirmedIncome': '25000',
+          'activeExpenses': '5000',
+          'net': '20000',
+          'transferCount': 1,
+          'expenseCount': 1,
+        },
+        'expensesByCategory': [
+          {'categoryName': 'Makanan', 'amount': '5000', 'count': 1},
+          {'categoryName': 'Transportasi', 'amount': '1000', 'count': 1},
+          {'categoryName': 'Pendidikan', 'amount': '2000', 'count': 1},
+          {'categoryName': 'Hiburan', 'amount': '3000', 'count': 1},
+          {'categoryName': 'Kesehatan', 'amount': '4000', 'count': 1},
+          {'categoryName': 'Lainnya', 'amount': '5000', 'count': 1},
+        ],
       };
     }
     if (path.startsWith('/history')) return {'items': <dynamic>[]};
@@ -212,6 +250,82 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('Transfer berhasil'), findsNothing);
+    expect(tester.takeException(), isNull);
+    api.dispose();
+  });
+
+  testWidgets('parent wallet summary opens child balances without refetching', (
+    tester,
+  ) async {
+    final api = _FakeApiClient();
+    await _openHome(tester, api, role: 'PARENT');
+
+    expect(find.text('Total Wallet Anak'), findsOneWidget);
+    expect(find.text('2 anak memiliki wallet'), findsOneWidget);
+    expect(find.text('Rp 22.500'), findsOneWidget);
+    expect(api.listCalls['/transfers'], 1);
+
+    await tester.ensureVisible(find.text('Total Wallet Anak'));
+    await tester.tap(find.text('Total Wallet Anak'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Wallet Anak'), findsOneWidget);
+    expect(find.text('Alya'), findsOneWidget);
+    expect(find.text('Bima'), findsOneWidget);
+    expect(find.text('Rp 15.000'), findsOneWidget);
+    expect(find.text('Rp 7.500'), findsOneWidget);
+    expect(api.listCalls['/transfers'], 1);
+    expect(tester.takeException(), isNull);
+    api.dispose();
+  });
+
+  testWidgets('monthly report card opens full report details', (tester) async {
+    final api = _FakeApiClient();
+    await _openHome(tester, api, role: 'PARENT');
+
+    await tester.ensureVisible(find.text('Laporan Bulan Ini'));
+    await tester.tap(find.text('Laporan Bulan Ini'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Pemasukan terkonfirmasi'), findsOneWidget);
+    expect(find.text('Pengeluaran per kategori'), findsOneWidget);
+    expect(find.text('Lainnya'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    api.dispose();
+  });
+
+  testWidgets('finance flow tabs show transfer and expense entries', (
+    tester,
+  ) async {
+    final api = _FakeApiClient();
+    api.transferRows.add({
+      'id': 'transfer-existing',
+      'amount': '5000',
+      'note': 'Uang saku',
+      'status': 'PENDING',
+      'createdAt': '2026-11-10T00:00:00.000Z',
+      'child': {'name': 'Alya'},
+      'parent': {'name': 'Parent'},
+    });
+    api.expenseRows.add({
+      'id': 'expense-existing',
+      'amount': '2000',
+      'description': 'Roti',
+      'status': 'ACTIVE',
+      'spentAt': '2026-11-09T00:00:00.000Z',
+      'category': {'id': 'food-id', 'name': 'Makanan'},
+      'child': {'name': 'Alya'},
+    });
+    await _openHome(tester, api, role: 'PARENT');
+
+    expect(find.text('Uang saku'), findsOneWidget);
+    expect(find.text('Untuk Alya · 10/11/2026'), findsOneWidget);
+    await tester.tap(find.text('Pengeluaran Terbaru'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Roti'), findsOneWidget);
+    expect(find.text('Makanan · Alya · 09/11/2026'), findsOneWidget);
+    expect(find.text('Uang saku'), findsNothing);
     expect(tester.takeException(), isNull);
     api.dispose();
   });

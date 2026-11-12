@@ -27,6 +27,11 @@ export class TransfersController {
     return this.transfers.list(user);
   }
 
+  @Get(':id')
+  getOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.transfers.getOne(id, user);
+  }
+
   @Post()
   @Roles(UserRole.PARENT)
   create(

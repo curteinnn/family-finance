@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/auth.types.js';
 import { CreateExpenseDto, VoidExpenseDto } from './create-expense.dto.js';
 import { CURRENCY_CODE } from '../common/currency.js';
+import { PushNotificationsService } from '../notifications/push-notifications.service.js';
 
 function codeOf(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
@@ -19,7 +20,10 @@ function codeOf(error: unknown): string | undefined {
 
 @Injectable()
 export class ExpensesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly push: PushNotificationsService,
+  ) {}
 
   async list(user: AuthenticatedUser) {
     if (!user.familyId || user.role === UserRole.ADMIN) throw new ForbiddenException();
@@ -45,6 +49,29 @@ export class ExpensesService {
     return expenses.map((expense) => ({ ...expense, amount: expense.amount.toFixed(0), currency: CURRENCY_CODE }));
   }
 
+  async getOne(id: string, user: AuthenticatedUser) {
+    if (!user.familyId || user.role === UserRole.ADMIN) throw new ForbiddenException();
+    const expense = await this.prisma.expense.findFirst({
+      where: {
+        id,
+        familyId: user.familyId,
+        ...(user.role === UserRole.PARENT ? {} : { childId: user.id }),
+      },
+      select: {
+        id: true,
+        amount: true,
+        description: true,
+        status: true,
+        spentAt: true,
+        createdAt: true,
+        child: { select: { name: true } },
+        category: { select: { name: true } },
+      },
+    });
+    if (!expense) throw new NotFoundException('Pengeluaran tidak ditemukan.');
+    return { ...expense, amount: expense.amount.toFixed(0), currency: CURRENCY_CODE };
+  }
+
   async create(dto: CreateExpenseDto, actor: AuthenticatedUser) {
     if (actor.role !== UserRole.CHILD || !actor.familyId) throw new ForbiddenException();
     const familyId = actor.familyId;
@@ -52,7 +79,7 @@ export class ExpensesService {
     if (amount.lte(0)) throw new BadRequestException('Jumlah pengeluaran harus lebih dari 0.');
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         const wallet = await tx.wallet.findFirst({
           where: { childId: actor.id, familyId, isActive: true },
           select: { id: true },
@@ -125,12 +152,24 @@ export class ExpensesService {
           });
         }
         return {
-          ...expense,
-          amount: expense.amount.toFixed(0),
-          balanceAfter: income.sub(spent).sub(amount).toFixed(0),
-          currency: CURRENCY_CODE,
+          response: {
+            ...expense,
+            amount: expense.amount.toFixed(0),
+            balanceAfter: income.sub(spent).sub(amount).toFixed(0),
+            currency: CURRENCY_CODE,
+          },
+          recipientId: parent?.userId ?? null,
         };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      if (result.recipientId) {
+        await this.push.sendToUser(result.recipientId, {
+          title: 'Pengeluaran Baru',
+          body: `Anak Anda mencatat pengeluaran sebesar Rp${result.response.amount}.`,
+          type: 'EXPENSE_CREATED',
+          transactionId: result.response.id,
+        });
+      }
+      return result.response;
     } catch (error) {
       if (codeOf(error) === 'P2034') throw new ConflictException('Saldo berubah bersamaan. Periksa saldo lalu coba lagi.');
       throw error;

@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/auth.types.js';
 import { CreateTransferDto, RejectTransferDto } from './create-transfer.dto.js';
 import { CURRENCY_CODE } from '../common/currency.js';
+import { PushNotificationsService } from '../notifications/push-notifications.service.js';
 
 function codeOf(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
@@ -19,7 +20,10 @@ function codeOf(error: unknown): string | undefined {
 
 @Injectable()
 export class TransfersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly push: PushNotificationsService,
+  ) {}
 
   async list(user: AuthenticatedUser) {
     if (!user.familyId || user.role === UserRole.ADMIN) {
@@ -52,6 +56,31 @@ export class TransfersService {
     return transfers.map((transfer) => ({ ...transfer, amount: transfer.amount.toFixed(0), currency: CURRENCY_CODE }));
   }
 
+  async getOne(id: string, user: AuthenticatedUser) {
+    if (!user.familyId || user.role === UserRole.ADMIN) {
+      throw new ForbiddenException('Akun ini tidak memiliki akses transfer family.');
+    }
+    const transfer = await this.prisma.fundTransfer.findFirst({
+      where: {
+        id,
+        familyId: user.familyId,
+        ...(user.role === UserRole.PARENT ? { parentId: user.id } : { childId: user.id }),
+      },
+      select: {
+        id: true,
+        amount: true,
+        note: true,
+        status: true,
+        createdAt: true,
+        confirmedAt: true,
+        parent: { select: { name: true } },
+        child: { select: { name: true } },
+      },
+    });
+    if (!transfer) throw new NotFoundException('Transfer tidak ditemukan.');
+    return { ...transfer, amount: transfer.amount.toFixed(0), currency: CURRENCY_CODE };
+  }
+
   async create(dto: CreateTransferDto, actor: AuthenticatedUser) {
     if (actor.role !== UserRole.PARENT || !actor.familyId) {
       throw new ForbiddenException();
@@ -62,7 +91,7 @@ export class TransfersService {
     if (amount.lte(0)) throw new BadRequestException('Jumlah transfer harus lebih dari 0.');
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         const child = await tx.child.findFirst({
           where: { userId: dto.childId, familyId },
           select: { userId: true },
@@ -115,6 +144,13 @@ export class TransfersService {
         });
         return { ...transfer, amount: transfer.amount.toFixed(0), currency: CURRENCY_CODE };
       });
+      await this.push.sendToUser(dto.childId, {
+        title: 'Uang Masuk',
+        body: `Parent mengirim uang sebesar Rp${result.amount} kepada Anda. Konfirmasi jika uang sudah diterima.`,
+        type: 'TRANSFER_CREATED',
+        transactionId: result.id,
+      });
+      return result;
     } catch (error) {
       if (codeOf(error) === 'P2034') throw new ConflictException('Data berubah bersamaan. Coba lagi.');
       throw error;
@@ -125,7 +161,7 @@ export class TransfersService {
     if (actor.role !== UserRole.CHILD || !actor.familyId) throw new ForbiddenException();
     const familyId = actor.familyId;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const transfer = await tx.fundTransfer.findFirst({
         where: { id, childId: actor.id, familyId },
         select: { id: true, parentId: true, amount: true, status: true },
@@ -154,8 +190,18 @@ export class TransfersService {
       await tx.auditLog.create({
         data: { familyId, actorId: actor.id, action: 'TRANSFER_CONFIRMED', entityType: 'FundTransfer', entityId: id },
       });
-      return { ...updated, amount: updated.amount.toFixed(0), currency: CURRENCY_CODE };
+      return {
+        response: { ...updated, amount: updated.amount.toFixed(0), currency: CURRENCY_CODE },
+        recipientId: transfer.parentId,
+      };
     });
+    await this.push.sendToUser(result.recipientId, {
+      title: 'Transfer Dikonfirmasi',
+      body: `Anak Anda telah mengonfirmasi penerimaan uang sebesar Rp${result.response.amount}.`,
+      type: 'TRANSFER_CONFIRMED',
+      transactionId: result.response.id,
+    });
+    return result.response;
   }
 
   async cancel(id: string, actor: AuthenticatedUser) {
