@@ -97,7 +97,7 @@ class _FamilyFinanceAppState extends State<FamilyFinanceApp> {
       title: 'Family Finance',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF176B55)),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color.fromARGB(255, 34, 153, 80)),
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFFF5F7F6),
         inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder()),

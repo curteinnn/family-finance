@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "379542450680",
+    "project_id": "family-finance-f16ff",
+    "storage_bucket": "family-finance-f16ff.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:379542450680:android:397699874c793d7aab660d",
+        "android_client_info": {
+          "package_name": "com.familyfinance.family_finance"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDKlBAXM3-pLCcb4HmMiJ4uDYl2xZYzXoA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
